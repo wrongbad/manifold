@@ -567,21 +567,43 @@ CrossSection CrossSection::Transform(const glm::mat3x2& m) const {
  */
 CrossSection CrossSection::Warp(
     std::function<void(glm::vec2&)> warpFunc) const {
-  auto paths = GetPaths();
-  auto warped = C2::PathsD();
-  warped.reserve(paths->paths_.size());
-  for (auto path : paths->paths_) {
-    auto sz = path.size();
-    auto s = C2::PathD(sz);
-    for (int i = 0; i < sz; ++i) {
-      auto v = v2_of_pd(path[i]);
-      warpFunc(v);
-      s[i] = v2_to_pd(v);
+  return WarpBatch([&warpFunc](glm::vec2* begin, glm::vec2* end) {
+    for (glm::vec2* p = begin; p != end; ++p) {
+      warpFunc(*p);
     }
-    warped.push_back(s);
+  });
+}
+
+/**
+ * Same as CrossSection::Warp but calls warpFunc with begin and end
+ * iterators to all the vertices to be warped.
+ * Note that warpFunc begin/end pointers follow c++ iterator
+ * conventions - the end is exclusive and not to be dereferenced
+ *
+ * @param warpFunc A function that modifies multiple vertex positions.
+ */
+CrossSection CrossSection::WarpBatch(
+    std::function<void(glm::vec2*, glm::vec2*)> warpFunc) const {
+  std::vector<glm::vec2> tmp_verts;
+  C2::PathsD paths = GetPaths()->paths_;  // deep copy
+  for (C2::PathD& path : paths) {
+    for (C2::PointD& p : path) {
+      tmp_verts.push_back(v2_of_pd(p));
+    }
   }
+
+  warpFunc(tmp_verts.data(), tmp_verts.data() + tmp_verts.size());
+
+  auto cursor = tmp_verts.begin();
+  for (C2::PathD& path : paths) {
+    for (C2::PointD& p : path) {
+      p = v2_to_pd(*cursor);
+      ++cursor;
+    }
+  }
+
   return CrossSection(
-      shared_paths(C2::Union(warped, C2::FillRule::Positive, precision_)));
+      shared_paths(C2::Union(paths, C2::FillRule::Positive, precision_)));
 }
 
 /**

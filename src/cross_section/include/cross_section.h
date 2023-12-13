@@ -97,6 +97,8 @@ class CrossSection {
   CrossSection Mirror(const glm::vec2 ax) const;
   CrossSection Transform(const glm::mat3x2& m) const;
   CrossSection Warp(std::function<void(glm::vec2&)> warpFunc) const;
+  CrossSection WarpBatch(
+      std::function<void(glm::vec2*, glm::vec2*)> warpFunc) const;
   CrossSection Simplify(double epsilon = 1e-6) const;
 
   // Adapted from Clipper2 docs:

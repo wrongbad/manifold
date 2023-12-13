@@ -719,7 +719,14 @@ void Manifold::Impl::MarkFailure(Error status) {
 }
 
 void Manifold::Impl::Warp(std::function<void(glm::vec3&)> warpFunc) {
-  thrust::for_each_n(thrust::host, vertPos_.begin(), NumVert(), warpFunc);
+  WarpBatch([&warpFunc](glm::vec3* begin, glm::vec3* end) {
+    thrust::for_each(thrust::host, begin, end, warpFunc);
+  });
+}
+
+void Manifold::Impl::WarpBatch(
+    std::function<void(glm::vec3*, glm::vec3*)> warpFunc) {
+  warpFunc(vertPos_.begin(), vertPos_.end());
   CalculateBBox();
   if (!IsFinite()) {
     MarkFailure(Error::NonFiniteVertex);

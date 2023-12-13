@@ -570,6 +570,20 @@ Manifold Manifold::Warp(std::function<void(glm::vec3&)> warpFunc) const {
 }
 
 /**
+ * Same as Manifold::Warp but calls warpFunc with begin and end
+ * iterators to all the vertices to be warped.
+ * Note that warpFunc begin/end pointers follow c++ iterator
+ * conventions - the end is exclusive and not to be dereferenced
+ * @param warpFunc A function that modifies multiple vertex positions.
+ */
+Manifold Manifold::WarpBatch(
+    std::function<void(glm::vec3*, glm::vec3*)> warpFunc) const {
+  auto pImpl = std::make_shared<Impl>(*GetCsgLeafNode().GetImpl());
+  pImpl->WarpBatch(warpFunc);
+  return Manifold(std::make_shared<CsgLeafNode>(pImpl));
+}
+
+/**
  * Create a new copy of this manifold with updated vertex properties by
  * supplying a function that takes the existing position and properties as
  * input. You may specify any number of output properties, allowing creation and
