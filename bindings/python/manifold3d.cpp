@@ -109,10 +109,11 @@ void to_glm_range(nb::ndarray<nb::numpy, T, nb::shape<nb::any, N>> const &arr,
 }
 // helper to convert numpy to std::vector<glm::vec*>
 template <class T, size_t N, glm::qualifier Precision = glm::defaultp>
-void to_glm_vector(nb::ndarray<nb::numpy, T, nb::shape<nb::any, N>> const &arr,
-                   std::vector<glm::vec<int(N), T, Precision>> &out) {
-  out.resize(arr.shape(0));
+std::vector<glm::vec<int(N), T, Precision>> to_glm_vector(
+    nb::ndarray<nb::numpy, T, nb::shape<nb::any, N>> const &arr) {
+  std::vector<glm::vec<int(N), T, Precision>> out(arr.shape(0));
   to_glm_range(arr, out.data(), out.data() + out.size());
+  return out;
 }
 
 using namespace manifold;
@@ -172,9 +173,9 @@ NB_MODULE(manifold3d, m) {
       "triangulate",
       [](std::vector<nb::ndarray<nb::numpy, float, nb::shape<nb::any, 2>>>
              polys) {
-        std::vector<std::vector<glm::vec2>> polys_vec(polys.size());
-        for (int i = 0; i < polys.size(); i++) {
-          to_glm_vector(polys[i], polys_vec[i]);
+        std::vector<std::vector<glm::vec2>> polys_vec;
+        for (auto &poly : polys) {
+          polys_vec.push_back(to_glm_vector(poly));
         }
         return to_numpy(Triangulate(polys_vec));
       },
@@ -211,20 +212,11 @@ NB_MODULE(manifold3d, m) {
           "Compute the convex hull enveloping a set of manifolds.")
       .def_static(
           "hull_points",
-          [](std::vector<Float3> &pts) {
-            std::vector<glm::vec3> vec(pts.size());
-            for (int i = 0; i < pts.size(); i++) {
-              vec[i] = {std::get<0>(pts[i]), std::get<1>(pts[i]),
-                        std::get<2>(pts[i])};
-            }
-            return Manifold::Hull(vec);
-          },
+          [](NumpyFloatNx3 pts) { return Manifold::Hull(to_glm_vector(pts)); },
           "Compute the convex hull enveloping a set of 3d points.")
       .def(
           "transform",
           [](Manifold &self, nb::ndarray<float, nb::shape<3, 4>> &mat) {
-            if (mat.ndim() != 2 || mat.shape(0) != 3 || mat.shape(1) != 4)
-              throw std::runtime_error("Invalid matrix shape, expected (3, 4)");
             glm::mat4x3 mat_glm;
             for (int i = 0; i < 3; i++) {
               for (int j = 0; j < 4; j++) {
@@ -347,7 +339,7 @@ NB_MODULE(manifold3d, m) {
           "\n\n"
           ":param f: A function that modifies multiple vertex positions.")
       .def(
-          "set_properties",
+          "set_properties",  // TODO this needs a batch version!
           [](Manifold &self, int newNumProp,
              const std::function<nb::object(
                  Float3, const nb::ndarray<nb::numpy, const float, nb::c_contig>
@@ -428,8 +420,6 @@ NB_MODULE(manifold3d, m) {
              std::optional<nb::ndarray<uint32_t, nb::shape<3>>> &normalIdx) {
             glm::ivec3 v(0);
             if (normalIdx.has_value()) {
-              if (normalIdx->ndim() != 1 || normalIdx->shape(0) != 3)
-                throw std::runtime_error("Invalid vector shape, expected (3)");
               auto value = *normalIdx;
               v = glm::ivec3(value(0), value(1), value(2));
             }
@@ -739,9 +729,6 @@ NB_MODULE(manifold3d, m) {
             out.vertProperties =
                 toVector<float>(vertProp.data(), vertProp.size());
 
-            if (triVerts.ndim() != 2 || triVerts.shape(1) != 3)
-              throw std::runtime_error(
-                  "Invalid tri_verts shape, expected (-1, 3)");
             out.triVerts = toVector<uint32_t>(triVerts.data(), triVerts.size());
 
             if (mergeFromVert.has_value())
@@ -761,27 +748,16 @@ NB_MODULE(manifold3d, m) {
                                                      runOriginalID->size());
 
             if (runTransform.has_value()) {
-              auto runTransform1 = *runTransform;
-              if (runTransform1.ndim() != 3 || runTransform1.shape(1) != 4 ||
-                  runTransform1.shape(2) != 3)
-                throw std::runtime_error(
-                    "Invalid run_transform shape, expected (-1, 4, 3)");
               out.runTransform =
-                  toVector<float>(runTransform1.data(), runTransform1.size());
+                  toVector<float>(runTransform->data(), runTransform->size());
             }
 
             if (faceID.has_value())
               out.faceID = toVector<uint32_t>(faceID->data(), faceID->size());
 
             if (halfedgeTangent.has_value()) {
-              auto halfedgeTangent1 = *halfedgeTangent;
-              if (halfedgeTangent1.ndim() != 3 ||
-                  halfedgeTangent1.shape(1) != 3 ||
-                  halfedgeTangent1.shape(2) != 4)
-                throw std::runtime_error(
-                    "Invalid halfedge_tangent shape, expected (-1, 3, 4)");
-              out.halfedgeTangent = toVector<float>(halfedgeTangent1.data(),
-                                                    halfedgeTangent1.size());
+              out.halfedgeTangent = toVector<float>(halfedgeTangent->data(),
+                                                    halfedgeTangent->size());
             }
           },
           nb::arg("vert_properties"), nb::arg("tri_verts"),
@@ -820,7 +796,7 @@ NB_MODULE(manifold3d, m) {
       .def_ro("run_original_id", &MeshGL::runOriginalID)
       .def_ro("face_id", &MeshGL::faceID)
       .def_static(
-          "level_set",
+          "level_set", // SDF needs refactoring to enable batched callback
           [](const std::function<float(float, float, float)> &f,
              std::vector<float> bounds, float edgeLength, float level = 0.0) {
             // Same format as Manifold.bounding_box
@@ -946,6 +922,14 @@ NB_MODULE(manifold3d, m) {
       .def("is_empty", &CrossSection::IsEmpty,
            "Does the CrossSection contain any contours?")
       .def(
+          "bounds",
+          [](CrossSection &self) {
+            Rect r = self.Bounds();
+            return nb::make_tuple(r.min[0], r.min[1], r.max[0], r.max[1]);
+          },
+          "Return bounding box of CrossSection as tuple("
+          "min_x, min_y, max_x, max_y)")
+      .def(
           "translate",
           [](CrossSection &self, Float2 v) {
             return self.Translate({std::get<0>(v), std::get<1>(v)});
@@ -983,8 +967,6 @@ NB_MODULE(manifold3d, m) {
       .def(
           "transform",
           [](CrossSection &self, nb::ndarray<float, nb::shape<2, 3>> &mat) {
-            if (mat.ndim() != 2 || mat.shape(0) != 2 || mat.shape(1) != 3)
-              throw std::runtime_error("Invalid matrix shape, expected (2, 3)");
             glm::mat3x2 mat_glm;
             for (int i = 0; i < 2; i++) {
               for (int j = 0; j < 3; j++) {
@@ -1078,12 +1060,8 @@ NB_MODULE(manifold3d, m) {
           "Compute the convex hull enveloping a set of cross-sections.")
       .def_static(
           "hull_points",
-          [](std::vector<Float2> &pts) {
-            std::vector<glm::vec2> poly(pts.size());
-            for (int i = 0; i < pts.size(); i++) {
-              poly[i] = {std::get<0>(pts[i]), std::get<1>(pts[i])};
-            }
-            return CrossSection::Hull(poly);
+          [](NumpyFloatNx2 pts) {
+            return CrossSection::Hull(to_glm_vector(pts));
           },
           "Compute the convex hull enveloping a set of 2d points.")
       .def("decompose", &CrossSection::Decompose,
